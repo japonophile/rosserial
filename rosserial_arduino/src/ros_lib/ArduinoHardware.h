@@ -37,6 +37,8 @@
 
 #if ARDUINO>=100
   #include <Arduino.h>  // Arduino 1.0
+#elif defined(BOARD_CM904)
+  #include "Arduino-compatibles.h"
 #else
   #include <WProgram.h>  // Arduino 0022
 #endif
@@ -50,6 +52,9 @@
 #elif defined(USE_USBCON)
   // Arduino Leonardo USB Serial Port
   #define SERIAL_CLASS Serial_
+#elif defined(BOARD_CM904)
+  #include <usb_serial.h>
+  #define SERIAL_CLASS USBSerial
 #else 
   #include <HardwareSerial.h>  // Arduino AVR
   #define SERIAL_CLASS HardwareSerial
@@ -66,6 +71,8 @@ class ArduinoHardware {
 #if defined(USBCON) and !(defined(USE_USBCON))
       /* Leonardo support */
       iostream = &Serial1;
+#elif defined(BOARD_CM904)
+      iostream = &SerialUSB;
 #else
       iostream = &Serial;
 #endif
@@ -87,14 +94,24 @@ class ArduinoHardware {
       // Startup delay as a fail-safe to upload a new sketch
       delay(3000); 
 #endif
+#if defined(BOARD_CM904)
+      iostream->begin();
+#else
       iostream->begin(baud_);
+#endif
     }
 
+    int available(){return iostream->available();}
     int read(){return iostream->read();};
+
+#if defined(BOARD_CM904)
+    void write(uint8_t* data, int length){ return iostream->write(data, length); }
+#else
     void write(uint8_t* data, int length){
       for(int i=0; i<length; i++)
         iostream->write(data[i]);
     }
+#endif
 
     unsigned long time(){return millis();}
 

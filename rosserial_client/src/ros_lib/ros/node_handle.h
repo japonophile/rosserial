@@ -66,7 +66,7 @@
 #define MODE_MSG_CHECKSUM   8   // checksum for msg and topic id
 
 
-#define MSG_TIMEOUT 20  //20 milliseconds to recieve all of message data
+#define MSG_TIMEOUT 500  //500 milliseconds to receive all of message data
 
 #include "msg.h"
 
@@ -192,6 +192,7 @@ namespace ros {
         /* reset if message has timed out */
         if ( mode_ != MODE_FIRST_FF){
           if (c_time > last_msg_timeout_time){
+            logerror("Message timeout");
             mode_ = MODE_FIRST_FF;
           }
         }
@@ -199,9 +200,15 @@ namespace ros {
         /* while available buffer, read data */
         while( true )
         {
+#if defined(BOARD_CM904)
+          if (!hardware_.available())
+            break;
+#endif
           int data = hardware_.read();
+#if !defined(BOARD_CM904)
           if( data < 0 )
             break;
+#endif
           checksum_ += data;
           if( mode_ == MODE_MESSAGE ){        /* message data being recieved */
             message_in[index_++] = data;
@@ -233,12 +240,14 @@ namespace ros {
             checksum_ = data;               /* first byte for calculating size checksum */
           }else if( mode_ == MODE_SIZE_H ){   /* top half of message size */
             bytes_ += data<<8;
-	    mode_++;
+            mode_++;
           }else if( mode_ == MODE_SIZE_CHECKSUM ){
             if( (checksum_%256) == 255)
 	      mode_++;
-	    else
+	    else {
+	      logerror("Checksum error");
 	      mode_ = MODE_FIRST_FF;          /* Abandon the frame if the msg len is wrong */
+	    }
 	  }else if( mode_ == MODE_TOPIC_L ){  /* bottom half of topic id */
             topic_ = data;
             mode_++;
@@ -252,8 +261,9 @@ namespace ros {
             mode_ = MODE_FIRST_FF;
             if( (checksum_%256) == 255){
               if(topic_ == TopicInfo::ID_PUBLISHER){
-                requestSyncTime();
                 negotiateTopics();
+                requestSyncTime(); /* sync time after sending topics, otherwise topics
+                                      message will be screwed up by the time msg from peer */
                 last_sync_time = c_time;
                 last_sync_receive_time = c_time;
                 return -1;
@@ -269,11 +279,14 @@ namespace ros {
                   subscribers[topic_-100]->callback( message_in );
               }
             }
+            else {
+                logerror("Checksum error");
+            }
           }
         }
 
         /* occasionally sync time */
-        if( configured_ && ((c_time-last_sync_time) > (SYNC_SECONDS*500) )){
+        if( configured_ && (mode_ == MODE_FIRST_FF) && ((c_time-last_sync_time) > (SYNC_SECONDS*500) )){
           requestSyncTime();
           last_sync_time = c_time;
         }
@@ -432,7 +445,7 @@ namespace ros {
         message_out[1] = PROTOCOL_VER;
         message_out[2] = (uint8_t) ((uint16_t)l&255);
         message_out[3] = (uint8_t) ((uint16_t)l>>8);
-	message_out[4] = 255 - ((message_out[2] + message_out[3])%256);
+        message_out[4] = 255 - ((message_out[2] + message_out[3])%256);
         message_out[5] = (uint8_t) ((int16_t)id&255);
         message_out[6] = (uint8_t) ((int16_t)id>>8);
 

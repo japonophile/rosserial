@@ -2,6 +2,11 @@
 Changelog for package rosserial_arduino
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.7.2 (2015-09-01)
+------------------
+* Add support for OpenCM9.04
+* Contributors: Antoine Choppin
+
 0.7.1 (2015-07-06)
 ------------------
 
