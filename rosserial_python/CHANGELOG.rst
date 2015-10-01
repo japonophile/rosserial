@@ -2,6 +2,11 @@
 Changelog for package rosserial_python
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.7.2 (2015-09-01)
+------------------
+* Send data in chunks and add debug traces.
+* Contributors: Antoine Choppin
+
 0.7.1 (2015-07-06)
 ------------------
 
