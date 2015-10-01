@@ -329,6 +329,7 @@ class SerialClient:
         self.lastsync_lost = rospy.Time(0)
         self.timeout = timeout
         self.synced = False
+        self.lastrx = ""
 
         self.pub_diagnostics = rospy.Publisher('/diagnostics', diagnostic_msgs.msg.DiagnosticArray, queue_size=10)
 
@@ -405,6 +406,7 @@ class SerialClient:
                 rospy.logwarn("Serial Port read returned short (expected %d bytes, received %d instead)."
                               % (length, len(bytes_read)))
                 raise IOError()
+            self.lastrx += bytes_read
             return bytes_read
         except Exception as e:
             rospy.logwarn("Serial Port read failure: %s", e)
@@ -435,9 +437,11 @@ class SerialClient:
                 flag = [0,0]
                 flag[0] = self.tryRead(1)
                 if (flag[0] != '\xff'):
+                    self.dumpLastRx()
                     continue
 
                 flag[1] = self.tryRead(1)
+
                 if ( flag[1] != self.protocol_ver):
                     self.sendDiagnostics(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Mismatched protocol version in packet: lost sync or rosserial_python is from different ros release than the rosserial client")
                     rospy.logerr("Mismatched protocol version in packet: lost sync or rosserial_python is from different ros release than the rosserial client")
@@ -447,6 +451,7 @@ class SerialClient:
                     else:
                         found_ver_msg = "Protocol version of client is unrecognized"
                     rospy.loginfo("%s, expected %s" % (found_ver_msg, protocol_ver_msgs[self.protocol_ver]))
+                    self.dumpLastRx()
                     continue
 
                 msg_len_bytes = self.tryRead(2)
@@ -458,6 +463,7 @@ class SerialClient:
                 if msg_len_checksum % 256 != 255:
                     rospy.loginfo("wrong checksum for msg length, length %d" %(msg_length))
                     rospy.loginfo("chk is %d" % ord(msg_len_chk))
+                    self.dumpLastRx()
                     continue
 
                 # topic id (2 bytes)
@@ -479,17 +485,25 @@ class SerialClient:
                 if checksum % 256 == 255:
                     self.synced = True
                     try:
+                        self.dumpLastRx()
                         self.callbacks[topic_id](msg)
                     except KeyError:
                         rospy.logerr("Tried to publish before configured, topic id %d" % topic_id)
                     rospy.sleep(0.001)
                 else:
+                    self.dumpLastRx()
                     rospy.loginfo("wrong checksum for topic id and msg")
 
             except IOError:
                 # One of the read calls had an issue. Just to be safe, request that the client
                 # reinitialize their topics.
+                self.dumpLastRx()
                 self.requestTopics()
+
+    def dumpLastRx(self):
+        rospy.logdebug("Rx "+" ".join(map(hex, map(ord, self.lastrx))))
+        #print " ".join(map(hex, map(ord, self.lastrx)))
+        self.lastrx = ""
 
     def setPublishSize(self, bytes):
         if self.buffer_out < 0:
@@ -674,8 +688,8 @@ class SerialClient:
         with self.mutex:
             length = len(msg)
             if self.buffer_in > 0 and length > self.buffer_in:
-                rospy.logerr("Message from ROS network dropped: message larger than buffer.")
-                print msg
+                rospy.logerr("Message from ROS network dropped: message larger ("+str(length)+" bytes) than buffer ("+str(self.buffer_in)+" bytes).")
+                #print msg
                 return -1
             else:
                     #modified frame : header(2 bytes) + msg_len(2 bytes) + msg_len_chk(1 byte) + topic_id(2 bytes) + msg(x bytes) + msg_topic_id_chk(1 byte)
@@ -684,7 +698,13 @@ class SerialClient:
                     msg_checksum = 255 - ( ((topic&255) + (topic>>8) + sum([ord(x) for x in msg]))%256 )
                     data = "\xff" + self.protocol_ver  + chr(length&255) + chr(length>>8) + chr(msg_len_checksum) + chr(topic&255) + chr(topic>>8)
                     data = data + msg + chr(msg_checksum)
-                    self.port.write(data)
+                    rospy.logdebug("Tx "+" ".join(map(hex, map(ord, data))))
+                    while len(data) > 0:
+                        chunk = data[0:57]
+                        data = data[57:]
+                        self.port.write(chunk)
+                        time.sleep(0.001)
+                    #self.port.write(data)
                     return length
 
     def sendDiagnostics(self, level, msg_text):
